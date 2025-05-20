@@ -10,11 +10,12 @@ OBJ := $(patsubst src/%.c, $(BUILD_DIR)%.o, $(SRC))
 
 HEADER = src/VENG.h
 LIBS = 
+DEBUG_LIBS = -L libs/VENG/ -lVENG
 
 all: $(LIBRARY)
 debug: src/main.c $(LIBRARY)
 	@echo "Building Debug App . . ."
-	@$(CC) $< -o $(BUILD_NAME) $(OBJ) $(LIBS) -L ./ -lMENG
+	@$(CC) $< -o $(BUILD_NAME) $(OBJ) $(LIBS) $(DEBUG_LIBS) -L ./ -lMENG
 	@echo "Done!"
 	@echo ""
 
