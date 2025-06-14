@@ -8,9 +8,8 @@ BUILD_NAME = "MENG"
 SRC := $(filter-out src/main.c, $(wildcard src/*.c))
 OBJ := $(patsubst src/%.c, $(BUILD_DIR)%.o, $(SRC))
 
-HEADER = src/VENG.h
-LIBS = 
-DEBUG_LIBS = -L libs/VENG/ -lVENG
+LIBS = -I libs/ -L libs/verovio -l verovio
+DEBUG_LIBS = -L libs/VENG/ -lVENG -lSDL2 -lSDL2_image -lSDL2_ttf -lm
 
 all: $(LIBRARY)
 debug: src/main.c $(LIBRARY)

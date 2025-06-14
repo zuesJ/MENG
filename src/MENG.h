@@ -1,30 +1,26 @@
-/*==========================================================================*\
- *                           MENG.h - MENG Library Header
- * ===========================================================================
- * This header contains all the function declarations and type definitions
- * required for the MENG library. The fundamental API for drawing in musical
- * notation.
- *
- * MIT License:
- * Copyright (c) 2025 Daniel García
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- * 
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
+#ifndef MENG_H
+#define MENG_H
 
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- * 
-\*==========================================================================*/
+typedef struct MENG_Score
+{
+    const char* MEI;
+    char* TimeMap;
+    char* ExpansionMap;
+    char* MIDI;
+} MENG_Score;
 
+// Return 0 on success, < 0 on failure
+
+/*Might return 0 on failure, but verovio will output an Error message*/
+int MENG_Init(char* verovio_resource_path);
+int MENG_Destroy();
+
+int MENG_LoadScore(char* new_score);
+int MENG_LoadScoreFromFile(char* path);
+
+int MENG_RenderSVG();
+int MENG_RenderTimemap();
+int MENG_RenderExpansionMap();
+int MENG_RenderMIDI();
+
+#endif

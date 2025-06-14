@@ -2,8 +2,11 @@
 *.d
 
 # Folders
+/res/
+/src/verovio/
 
-
+# Files
+/MENG
 
 # Object files
 *.o
