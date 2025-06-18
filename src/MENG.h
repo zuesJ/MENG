@@ -23,6 +23,30 @@ int MENG_RenderTimemap();
 int MENG_RenderExpansionMap();
 int MENG_RenderMIDI();
 
+// <------MEI Methods------>
+int MENG_LoadMEIFile(char* file);
+int MENG_SaveMEIFile(MENG_MEI mei, char* file);
+
+
+
+// <------MEI Structure------>
+typedef struct MENG_MEI MENG_MEI;
+
+    typedef struct MENG_MeiHead MENG_MeiHead;
+        typedef struct MENG_FileDesc MENG_FileDesc;
+            typedef struct MENG_TitleStmt MENG_TitleStmt;
+                typedef struct MENG_RespStmt MENG_RespStmt;
+                typedef enum MENG_Role MENG_Role;
+                typedef struct MENG_PersName MENG_PersName;
+                typedef struct MENG_CorpName MENG_CorpName;
+            typedef struct MENG_PubStmt MENG_PubStmt;
+        typedef struct MENG_EncodingDesc MENG_EncodingDesc;
+            typedef struct MENG_ProjectDesc;
+        typedef struct MENG_RevisionDesc MENG_RevisionDesc;
+            typedef struct MENG_Change MENG_Change;
+
+    typedef struct MENG_Music MENG_Music;
+
 // <------MEI------>
 typedef struct MENG_MEI
 {
@@ -106,17 +130,18 @@ typedef struct MENG_MEI
                 char* desc;
             } MENG_ProjectDesc;
 
-            typedef struct MENG_AppInfo
-            {
-
-            } MENG_AppInfo;
-
         // <------RevisionDesc------>
         typedef struct MENG_RevisionDesc
         {
-
+            MENG_Change** changes;
         } MENG_RevisionDesc;
 
+            typedef struct MENG_Change
+            {
+                char* date;
+                MENG_RespStmt respStmt;
+                char* changeDesc;
+            } MENG_Change;
     // <------Music------>
 
 
