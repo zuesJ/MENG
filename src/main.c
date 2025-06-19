@@ -26,14 +26,18 @@ void fill_a_rect_with_color (VENG_Element* element, SDL_Color color);
 
 int main (int argc, char* argv[])
 {
+	MENG_Init("./libs/verovio/data");
+	MENG_LoadMEIFile("res/MM.mei");
+    MENG_PrintMEI();
+	return 0;
 	//MENG_Init("./libs/verovio/data");
 
 	VRV_Toolkit tk = vrvToolkit_constructorResourcePath("./libs/verovio/data");
 	enableLog(false);
 
-    vrvToolkit_loadFile(tk, "./res/score1.mei");
+    vrvToolkit_loadFile(tk, "./res/MM.mei");
 
-	const char *options = "{ \"pageHeight\": 2000, \"pageWidth\": 60000, \"scale\": 40 }";
+	const char *options = "{\"breaks\": \"none\" }";
 
 	vrvToolkit_setOptions(tk, options);
 	vrvToolkit_redoLayout(tk, options);
@@ -44,7 +48,7 @@ int main (int argc, char* argv[])
 
     vrvToolkit_destructor(tk);
 
-	return 0;
+	
     StartSDL();
 	SDL_ShowCursor(SDL_DISABLE);
 	VENG_Init(driver);
