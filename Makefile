@@ -9,7 +9,7 @@ SRC := $(filter-out src/main.c, $(wildcard src/*.c))
 OBJ := $(patsubst src/%.c, $(BUILD_DIR)%.o, $(SRC))
 
 LIBS = -I libs/ -L libs/verovio -l verovio `xml2-config --cflags --libs`
-DEBUG_LIBS = -L libs/VENG/ -lVENG -lSDL2 -lSDL2_image -lSDL2_ttf -lm
+DEBUG_LIBS = -L libs/VENG/ -lVENG -lSDL2 -lSDL2_image -lSDL2_ttf -lm $(shell pkg-config --libs cairo librsvg-2.0) $(shell pkg-config --cflags cairo librsvg-2.0)
 
 all: $(LIBRARY)
 debug: src/main.c $(LIBRARY)
@@ -17,6 +17,9 @@ debug: src/main.c $(LIBRARY)
 	@$(CC) $< -o $(BUILD_NAME) $(OBJ) $(LIBS) $(DEBUG_LIBS) -L ./ -lMENG
 	@echo "Done!"
 	@echo ""
+
+run:
+	./$(BUILD_NAME)
 
 $(LIBRARY): build_dir $(OBJ)
 	@echo "Compiling lib . . ."

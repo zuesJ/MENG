@@ -3,28 +3,10 @@
 
 #include <stdbool.h>
 
-typedef struct MENG_Score
-{
-    const char* MEI;
-    char* TimeMap;
-    char* ExpansionMap;
-    char* MIDI;
-} MENG_Score;
-
-// Return 0 on success, < 0 on failure
-
 /*Might return 0 on failure, but verovio will output an Error message*/
 int MENG_Init(char* verovio_resource_path);
 bool MENG_IsInit();
 int MENG_Destroy();
-
-int MENG_LoadScore(char* new_score);
-int MENG_LoadScoreFromFile(char* path);
-
-int MENG_RenderSVG();
-int MENG_RenderTimemap();
-int MENG_RenderExpansionMap();
-int MENG_RenderMIDI();
 
 // <------MEI Structure------>
 typedef struct MENG_MEI MENG_MEI;
@@ -50,18 +32,170 @@ typedef struct MENG_MEI MENG_MEI;
                 typedef struct MENG_Clef MENG_Clef;
                 typedef struct MENG_MeterSig MENG_MeterSig;
         typedef struct MENG_Section MENG_Section;
-
+            typedef struct MENG_Measure MENG_Measure;
+                typedef struct MENG_Staff MENG_Staff;
+                    typedef struct MENG_Layer MENG_Layer;
+                        typedef struct MENG_Order MENG_Order;
+                        typedef enum MENG_OrderType MENG_OrderType;
+                        typedef union MENG_OrderElement MENG_OrderElement;
+                        typedef struct MENG_Note MENG_Note;
+                        typedef struct MENG_Rest MENG_Rest;
+                        typedef struct MENG_Chord MENG_Chord;
+                        typedef struct MENG_Beam MENG_Beam;
+                        typedef enum MENG_Duration MENG_Duration;
+                        typedef enum MENG_Octave MENG_Octave;
+                        typedef enum MENG_Pitch MENG_Pitch;
+                typedef enum MENG_TempoPlacement MENG_TempoPlacement;
+                typedef struct MENG_Tempo MENG_Tempo; 
+        typedef struct MENG_Tie MENG_Tie;  
 
 
 // <------MEI Methods------>
-int MENG_LoadMEIFile(char* file);
-void MENG_PrintMEI();
-int MENG_SaveMEIFile(MENG_MEI mei, char* file);
+MENG_MEI MENG_LoadMEIFile(char* file);
+char* MENG_OutputMeiAsChar(MENG_MEI mei);
+void MENG_PrintMEI(MENG_MEI mei);
 
 // <------MEI------>
+typedef enum MENG_OrderType
+{
+    MENG_TYPE_UNDEFINED = 0,
+    MENG_TYPE_NOTE,
+    MENG_TYPE_REST,
+    MENG_TYPE_CHORD,
+    MENG_TYPE_BEAM
+} MENG_OrderType;
+
+typedef union MENG_OrderElement
+{
+    MENG_Note* note;
+    MENG_Rest* rest;
+    MENG_Chord* chord;
+    MENG_Beam* beam;
+} MENG_OrderElement;
+
+typedef struct MENG_Order
+{
+    MENG_OrderType type;
+    MENG_OrderElement element;
+} MENG_Order;
+
+typedef struct MENG_Tie
+{
+    char* startid; // Ids should contain # at the beginning
+    char* endid;
+} MENG_Tie;
+
+typedef enum MENG_Duration
+{
+    MENG_DURATION_WHOLE = 1,
+    MENG_DURATION_HALF = 2,
+    MENG_DURATION_QUARTER = 4,
+    MENG_DURATION_EIGHTH = 8,
+    MENG_DURATION_SIXTEENTH = 16
+} MENG_Duration;
+
+typedef enum MENG_Octave
+{
+    MENG_OCTAVE_1 = 1,
+    MENG_OCTAVE_2 = 2,
+    MENG_OCTAVE_3 = 3,
+    MENG_OCTAVE_4 = 4,
+    MENG_OCTAVE_5 = 5,
+    MENG_OCTAVE_6 = 6,
+    MENG_OCTAVE_7 = 7,
+    MENG_OCTAVE_8 = 8
+} MENG_Octave;
+
+typedef enum MENG_Pitch
+{
+    MENG_PITCH_C,
+    MENG_PITCH_D,
+    MENG_PITCH_E,
+    MENG_PITCH_F,
+    MENG_PITCH_G,
+    MENG_PITCH_A,
+    MENG_PITCH_B
+} MENG_Pitch;
+
+typedef struct MENG_Note
+{
+    MENG_Duration dur;
+    MENG_Octave oct;
+    MENG_Pitch pname;
+} MENG_Note;
+
+typedef struct MENG_Rest
+{
+    MENG_Duration dur;
+} MENG_Rest;
+
+typedef struct MENG_Chord
+{
+    MENG_Duration dur;
+    MENG_Note** notes;          // Note dur value must = 0, as dur is already defined in chord.dur
+    unsigned int notes_count;   // By definition, notes cannot be repeated on the same chord
+} MENG_Chord;
+
+typedef struct MENG_Beam
+{
+    MENG_Note** notes;
+    unsigned int notes_count;
+    MENG_Rest** rests;
+    unsigned int rests_count;
+    MENG_Chord** chords;
+    unsigned int chords_count;
+    MENG_Order** order;
+    unsigned int order_count;
+} MENG_Beam;
+
+typedef struct MENG_Layer
+{
+    MENG_Note** notes;
+    unsigned int notes_count;
+    MENG_Rest** rests;
+    unsigned int rests_count;
+    MENG_Chord** chords;
+    unsigned int chords_count;
+    MENG_Beam** beams;
+    unsigned int beams_count;
+    MENG_Order** order;
+    unsigned int order_count;
+} MENG_Layer;
+
+typedef enum MENG_TempoPlacement
+{
+    MENG_TEMPOPLACEMENT_ABOVE,
+    MENG_TEMPOPLACEMENT_BELOW,
+    MENG_TEMPOPLACEMENT_BETWEEN,
+    MENG_TEMPOPLACEMENT_WITHIN
+} MENG_TempoPlacement;
+
+typedef struct MENG_Tempo
+{
+    unsigned int bpm;
+    unsigned int tstamp;
+    MENG_TempoPlacement place;
+    unsigned char staff;
+} MENG_Tempo;
+
+typedef struct MENG_Staff 
+{
+    MENG_Layer** layers;
+    unsigned int layers_count;
+} MENG_Staff;
+
+typedef struct MENG_Measure
+{
+    MENG_Staff staffs[2];
+    MENG_Tempo tempo;
+} MENG_Measure;
+
 typedef struct MENG_Section
 {
-    int unused;
+    MENG_Measure** measures;
+    unsigned int measures_count;
+    MENG_Tie** ties;
+    unsigned int ties_count;
 } MENG_Section;
 
 typedef enum MENG_MIDI_Instrument
@@ -297,7 +431,7 @@ typedef struct MENG_PubStmt
 typedef struct MENG_FileDesc
 {
     MENG_TitleStmt titleStmt;
-    MENG_PubStmt pubStm;
+    MENG_PubStmt pubStmt;
 } MENG_FileDesc;
 
 typedef struct MENG_ProjectDesc
