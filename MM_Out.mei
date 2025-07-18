@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?xml-model href="https://music-encoding.org/schema/5.1/mei-all.rng" type="application/xml" schematypens="http://relaxng.org/ns/structure/1.0"?>
+<?xml-model href="https://music-encoding.org/schema/5.1/mei-all.rng" type="application/xml" schematypens="http://purl.oclc.org/dsdl/schematron"?>
+<mei xmlns="http://www.music-encoding.org/ns/mei" meiversion="5.1">
+  <meiHead>
+    <fileDesc>
+      <titleStmt>
+        <title>Paradise</title>
+        <respStmt>
+          <persName role="author">Coldplay</persName>
+          <persName role="arranger">Dani García</persName>
+        </respStmt>
+      </titleStmt>
+      <pubStmt>
+        <publisher>Parlophone Records and Capitol Records</publisher>
+        <pubPlace>United Kingdom and United States</pubPlace>
+        <date>2011-09-12</date>
+        <availability>Copyright © 2011 by Parlophone Records Ltd., a Warner Music Group Company</availability>
+      </pubStmt>
+    </fileDesc>
+    <encodingDesc>
+      <projectDesc>
+        <p>Piano arrangement of the song "Paradise" by Coldplay</p>
+      </projectDesc>
+    </encodingDesc>
+    <revisionDesc>
+      <change n="0" isodate="2025-06-19">
+        <respStmt>
+          <persName role="arranger">Dani García</persName>
+        </respStmt>
+        <changeDesc>
+          <p>Made meiHead</p>
+        </changeDesc>
+      </change>
+    </revisionDesc>
+  </meiHead>
+  <music>
+    <body>
+      <mdiv>
+        <score>
+          <scoreDef>
+            <staffGrp bar.thru="true">
+              <grpSym symbol="brace"/>
+              <label>Piano</label>
+              <labelAbbr>P.</labelAbbr>
+              <instrDef midi.channel="0" midi.instrnum="2"/>
+              <staffDef n="1" lines="5">
+                <clef shape="G" line="2"/>
+                <keySig sig="1f"/>
+                <meterSig count="4" unit="4"/>
+              </staffDef>
+              <staffDef n="2" lines="5">
+                <clef shape="F" line="4"/>
+                <keySig sig="1f"/>
+                <meterSig count="4" unit="4"/>
+              </staffDef>
+            </staffGrp>
+          </scoreDef>
+          <section>
+            <measure xml:id="m1">
+              <staff n="1">
+                <layer n="1">
+                  <note xml:id="m1s1l1n1" pname="d" oct="4" dur="2"/>
+                  <rest xml:id="m1s1l1r1" dur="4"/>
+                  <chord xml:id="m1s1l1c1" dur="4">
+                    <note xml:id="m1s1l1c1n1" pname="c" oct="4"/>
+                    <note xml:id="m1s1l1c1n2" pname="e" oct="4"/>
+                    <note xml:id="m1s1l1c1n3" pname="g" oct="4"/>
+                  </chord>
+                  <beam xml:id="m1s1l1b1">
+                    <chord xml:id="m1s1l1b1c1" dur="8">
+                      <note xml:id="m1s1l1b1c1n1" pname="d" oct="4"/>
+                      <note xml:id="m1s1l1b1c1n2" pname="g" oct="4"/>
+                    </chord>
+                    <note xml:id="m1s1l1b1n1" pname="b" oct="3" dur="8"/>
+                    <chord xml:id="m1s1l1b1c2" dur="8">
+                      <note xml:id="m1s1l1b1c2n1" pname="d" oct="4"/>
+                      <note xml:id="m1s1l1b1c2n2" pname="g" oct="4"/>
+                    </chord>
+                    <note xml:id="m1s1l1b1n2" pname="b" oct="3" dur="8"/>
+                    <chord xml:id="m1s1l1b1c3" dur="8">
+                      <note xml:id="m1s1l1b1c3n1" pname="d" oct="4"/>
+                      <note xml:id="m1s1l1b1c3n2" pname="g" oct="4"/>
+                    </chord>
+                    <note xml:id="m1s1l1b1n3" pname="b" oct="3" dur="8"/>
+                    <note xml:id="m1s1l1b1n4" pname="f" oct="4" dur="8"/>
+                    <chord xml:id="m1s1l1b1c4" dur="8">
+                      <note xml:id="m1s1l1b1c4n1" pname="c" oct="4"/>
+                      <note xml:id="m1s1l1b1c4n2" pname="e" oct="4"/>
+                    </chord>
+                  </beam>
+                </layer>
+              </staff>
+              <staff n="2"/>
+              <tempo xml:id="m1t" midi.bpm="152" tstamp="1" place="above" staff="1"><rend glyph.auth="smufl">♩</rend> = 152</tempo>
+              <tie startid="#m1s1l1b1c1n1" endid="#m1s1l1b1c2n1"/>
+            </measure>
+          </section>
+        </score>
+      </mdiv>
+    </body>
+  </music>
+</mei>

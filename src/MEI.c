@@ -42,7 +42,6 @@ typedef struct MENG_MeiXml
                     xmlNode* meterSig2;
         xmlNode* section;
 } MENG_MeiXml;
-
 static xmlNode* __SearchNode(xmlNode* node, const xmlChar* node_name);
 static int __LoadXmlNodes(char* file, MENG_MeiXml* xml);
 static void __PrintXml(MENG_MeiXml xml);
@@ -57,10 +56,17 @@ static void __AnalyzeLayer(xmlNode* layer_node, MENG_Layer* layer);
 static MENG_Chord* __AnalyzeChord(xmlNode* chord_node);
 static MENG_Beam* __AnalyzeBeam(xmlNode* beam_node);
 static MENG_TempoPlacement __TranslateTempoPlacementByText(const char* place_text);
+static char* __TranslateTempoPlacementToText(MENG_TempoPlacement place);
 static MENG_Duration __TranslateDurationByText(const char* dur_text);
 static MENG_Octave __TranslateOctaveByText(const char* oct_text);
 static MENG_Pitch __TranslatePitchByText(const char* pitch_text);
 static void __PrintLayerElements(MENG_Layer* layer);
+static void __ProcessMeasureToSVG(xmlNode* measure_node, MENG_Measure* measure, unsigned int measure_index, MENG_Section* section, xmlDoc* doc);
+static void __ProcessStaffToSVG(xmlNode* staff_node, MENG_Staff* staff, unsigned int indices[2], xmlDoc* doc);
+static void __ProcessLayerToSVG(xmlNode* layer_node, MENG_Layer* layer, unsigned int indices[3], xmlDoc* doc);
+static char __TranslatePicthToText(MENG_Pitch pitch);
+static void __ProcessChordToSVG(xmlNode* chord_node, MENG_Chord* chord, unsigned int indices[4], xmlDoc* doc);
+static void __ProcessBeamToSVG(xmlNode* beam_node, MENG_Beam* beam, unsigned int indices[4], xmlDoc* doc);
 
 MENG_MEI MENG_LoadMEIFile(char* file)
 {
@@ -171,7 +177,6 @@ MENG_MEI MENG_LoadMEIFile(char* file)
 
     mei.music.scoreDef.instrDef.midi_channel = (unsigned char)strtol((const char*)midi_channel_text, NULL, 10);
     mei.music.scoreDef.instrDef.midi_instrnum = (int)strtol((const char*)midi_instrnum_text, NULL, 10);
-    mei.music.scoreDef.instrDef.midi_volume = (unsigned char)strtol((const char*)midi_volume_text, NULL, 10);
 
     xmlFree(midi_channel_text);
     xmlFree(midi_instrnum_text);
@@ -279,351 +284,20 @@ MENG_MEI MENG_LoadMEIFile(char* file)
 
     return mei;
 }
-static void __AnalyzeMeasure(xmlNode* measure_node, MENG_Measure* measure, MENG_MEI* mei)
-{
-    if (measure == NULL || measure_node == NULL) return;
-    for (xmlNode* cur = measure_node->children; cur != NULL; cur = cur->next)
-    {
-        if (cur->type == XML_ELEMENT_NODE && xmlStrcmp(cur->name, (const xmlChar *)"tempo") == 0)
-        {
-            xmlChar* bpm = xmlGetProp(cur, (const xmlChar*)"midi.bpm");
-            if (bpm == NULL) return;
-            xmlChar* tstamp = xmlGetProp(cur, (const xmlChar*)"tstamp");
-            if (tstamp == NULL) return;
-            xmlChar* place = xmlGetProp(cur, (const xmlChar*)"place");
-            if (place == NULL) return;
-            xmlChar* staff = xmlGetProp(cur, (const xmlChar*)"staff");
-            if (staff == NULL) return;
-            measure->tempo.bpm = strtol((const char*)bpm, NULL, 10);
-            measure->tempo.tstamp = strtol((const char*)tstamp, NULL, 10);
-            measure->tempo.place = __TranslateTempoPlacementByText((char*)place);
-            measure->tempo.staff = strtol((const char*)staff, NULL, 10);
-            xmlFree(bpm);
-            xmlFree(tstamp);
-            xmlFree(place);
-            xmlFree(staff);
-        }
-        else if (cur->type == XML_ELEMENT_NODE && xmlStrcmp(cur->name, (const xmlChar *)"tie") == 0)
-        {
-            if (mei->music.section.ties == NULL)
-            {
-                mei->music.section.ties = (MENG_Tie**)calloc(1, sizeof(MENG_Tie*));
-                mei->music.section.ties_count = 1;
-            }
-            else
-            {
-                mei->music.section.ties_count++;
-                mei->music.section.ties = (MENG_Tie**)realloc(mei->music.section.ties, mei->music.section.ties_count * sizeof(MENG_Tie*));
-            }
-            mei->music.section.ties[mei->music.section.ties_count - 1] = (MENG_Tie*)calloc(1, sizeof(MENG_Tie));
-            xmlChar* startid = xmlGetProp(cur, (xmlChar*)"startid");
-            if (startid == NULL) return;
-            xmlChar* endid = xmlGetProp(cur, (xmlChar*)"endid");
-            if (endid == NULL) return;
-            mei->music.section.ties[mei->music.section.ties_count - 1]->startid = strdup(startid);
-            mei->music.section.ties[mei->music.section.ties_count - 1]->endid = strdup(endid);
-            xmlFree(startid);
-            xmlFree(endid);
-        }
-        else if (cur->type == XML_ELEMENT_NODE && xmlStrcmp(cur->name, (const xmlChar *)"staff") == 0)
-        {
-            xmlChar* n = xmlGetProp(cur, (xmlChar*)"n");
-            if (n == NULL) return;
-            unsigned int n_num = strtol((const char*)n, NULL, 10);
-            if (n_num == 1)
-            {
-                __AnalyzeStaff(cur, &measure->staffs[0]);
-            }
-            else if (n_num == 2)
-            {
-                __AnalyzeStaff(cur, &measure->staffs[1]);
-            }
-            else
-            {
-                return;
-            }
-        }
-    }
-}
-static void __AnalyzeStaff(xmlNode* staff_node, MENG_Staff* staff)
-{
-    if (staff_node == NULL || staff == NULL) return;
-    for (xmlNode* cur = staff_node->children; cur != NULL; cur = cur->next)
-    {
-        if (cur->type == XML_ELEMENT_NODE && xmlStrcmp(cur->name, (const xmlChar *)"layer") == 0)
-        {
-            unsigned int index = strtol((const char*)xmlGetProp(cur, (xmlChar*)"n"), NULL, 10) - 1;
-            if (staff->layers == NULL)
-            {
-                staff->layers = (MENG_Layer**)calloc(index + 1, sizeof(MENG_Layer*));
-                staff->layers_count = index + 1;
-            }
-            else if (staff->layers_count < index + 1)
-            {
-                staff->layers = (MENG_Layer**)realloc(staff->layers, (index + 1) * sizeof(MENG_Layer*));
-                for (unsigned int i = staff->layers_count; i < (index + 1); i++)
-                {
-                    staff->layers[i] = NULL;
-                }
-                staff->layers_count = index + 1;
-            }
-            staff->layers[index] = (MENG_Layer*)calloc(1, sizeof(MENG_Layer));
-            __AnalyzeLayer(cur, staff->layers[index]);
-        }
-    }
-}
-static void __AnalyzeLayer(xmlNode* layer_node, MENG_Layer* layer)
-{
-    if (layer_node == NULL || layer == NULL) return;
-    unsigned int notes_count = 0;
-    unsigned int rests_count = 0;
-    unsigned int chords_count = 0;
-    unsigned int beams_count = 0;
-    for (xmlNode* cur = layer_node->children; cur != NULL; cur = cur->next)
-    {
-        if (cur->type == XML_ELEMENT_NODE && xmlStrcmp(cur->name, (const xmlChar *)"note") == 0)
-        {
-            notes_count++;
-        }
-        else if (cur->type == XML_ELEMENT_NODE && xmlStrcmp(cur->name, (const xmlChar *)"rest") == 0)
-        {
-            rests_count++;
-        }
-        else if (cur->type == XML_ELEMENT_NODE && xmlStrcmp(cur->name, (const xmlChar *)"chord") == 0)
-        {
-            chords_count++;
-        }
-        else if (cur->type == XML_ELEMENT_NODE && xmlStrcmp(cur->name, (const xmlChar *)"beam") == 0)
-        {
-            beams_count++;
-        }
-    }
-    layer->notes_count = notes_count;
-    layer->rests_count = rests_count;
-    layer->chords_count = chords_count;
-    layer->beams_count = beams_count;
-    if (notes_count > 0)
-    {
-        layer->notes = (MENG_Note**)calloc(notes_count, sizeof(MENG_Note*));
-    }
-    if (rests_count > 0)
-    {
-        layer->rests = (MENG_Rest**)calloc(rests_count, sizeof(MENG_Rest*));
-    }
-    if (chords_count > 0)
-    {
-        layer->chords = (MENG_Chord**)calloc(chords_count, sizeof(MENG_Chord*));
-    }
-    if (beams_count > 0)
-    {
-        layer->beams = (MENG_Beam**)calloc(beams_count, sizeof(MENG_Beam*));
-    }
 
-    unsigned int notes_i = 0;
-    unsigned int rests_i = 0;
-    unsigned int chords_i = 0;
-    unsigned int beams_i = 0;
-
-    unsigned int total_count = notes_count + rests_count + chords_count + beams_count;
-    if (total_count > 0)
-    {
-        layer->order_count = total_count;
-        layer->order = (MENG_Order**)calloc(total_count, sizeof(MENG_Order*));
-    }
-    for (xmlNode* cur = layer_node->children; cur != NULL; cur = cur->next)
-    {
-        unsigned int total_i = notes_i + rests_i + chords_i + beams_i;
-        if (cur->type == XML_ELEMENT_NODE && xmlStrcmp(cur->name, (const xmlChar *)"note") == 0)
-        {
-            xmlChar* dur_text = xmlGetProp(cur, (xmlChar*)"dur");
-            if (dur_text == NULL) return;
-            xmlChar* oct_text = xmlGetProp(cur, (xmlChar*)"oct");
-            if (oct_text == NULL) return;
-            xmlChar* pname_text = xmlGetProp(cur, (xmlChar*)"pname");
-            if (pname_text == NULL) return;
-            layer->notes[notes_i] = (MENG_Note*)calloc(1, sizeof(MENG_Note));
-            layer->notes[notes_i]->dur = __TranslateDurationByText((const char*)dur_text);
-            layer->notes[notes_i]->oct = __TranslateOctaveByText((const char*)oct_text);
-            layer->notes[notes_i]->pname = __TranslatePitchByText((const char*)pname_text);
-            xmlFree(oct_text);
-            xmlFree(pname_text);
-            layer->order[total_i] = (MENG_Order*)calloc(1, sizeof(MENG_Order));
-            layer->order[total_i]->type = MENG_TYPE_NOTE;
-            layer->order[total_i]->element.note = layer->notes[notes_i];
-            notes_i++;
-        }
-        else if (cur->type == XML_ELEMENT_NODE && xmlStrcmp(cur->name, (const xmlChar *)"rest") == 0)
-        {
-            xmlChar* dur_text = xmlGetProp(cur, (xmlChar*)"dur");
-            if (dur_text == NULL) return;
-            layer->rests[rests_i] = (MENG_Rest*)calloc(1, sizeof(MENG_Rest));
-            layer->rests[rests_i]->dur = __TranslateDurationByText((const char*)dur_text);
-            xmlFree(dur_text);
-            layer->order[total_i] = (MENG_Order*)calloc(1, sizeof(MENG_Order));
-            layer->order[total_i]->type = MENG_TYPE_REST;
-            layer->order[total_i]->element.rest = layer->rests[rests_i];
-            rests_i++;
-        }
-        else if (cur->type == XML_ELEMENT_NODE && xmlStrcmp(cur->name, (const xmlChar *)"chord") == 0)
-        {
-            layer->chords[chords_i] = __AnalyzeChord(cur);
-            layer->order[total_i] = (MENG_Order*)calloc(1, sizeof(MENG_Order));
-            layer->order[total_i]->type = MENG_TYPE_CHORD;
-            layer->order[total_i]->element.chord = layer->chords[chords_i];
-            chords_i++;
-        }
-        else if (cur->type == XML_ELEMENT_NODE && xmlStrcmp(cur->name, (const xmlChar *)"beam") == 0)
-        {
-            layer->beams[beams_i] = __AnalyzeBeam(cur);
-            layer->order[total_i] = (MENG_Order*)calloc(1, sizeof(MENG_Order));
-            layer->order[total_i]->type = MENG_TYPE_BEAM;
-            layer->order[total_i]->element.beam = layer->beams[beams_i];
-            beams_i++;
-        }
-    }
-    
-}
-static MENG_Chord* __AnalyzeChord(xmlNode* chord_node)
-{
-    if (chord_node == NULL) return NULL;
-    xmlChar* dur_text = xmlGetProp(chord_node, (xmlChar*)"dur");
-    if (dur_text == NULL) return NULL;
-    MENG_Chord* new_chord = (MENG_Chord*)calloc(1, sizeof(MENG_Chord));
-    new_chord->dur = __TranslateDurationByText((const char*)dur_text);
-    unsigned int notes_count = 0;
-    for (xmlNode* cur = chord_node->children; cur != NULL; cur = cur->next)
-    {
-        if (cur->type == XML_ELEMENT_NODE && xmlStrcmp(cur->name, (const xmlChar *)"note") == 0)
-        {
-            notes_count++;
-        }
-    }
-    new_chord->notes = (MENG_Note**)calloc(notes_count, sizeof(MENG_Note*));
-    new_chord->notes_count = notes_count;
-    unsigned int notes_i = 0;
-    for (xmlNode* cur = chord_node->children; cur != NULL; cur = cur->next)
-    {
-        if (cur->type == XML_ELEMENT_NODE && xmlStrcmp(cur->name, (const xmlChar *)"note") == 0)
-        {
-            xmlChar* oct_name = xmlGetProp(cur, (xmlChar*)"oct");
-            xmlChar* pname_name = xmlGetProp(cur, (xmlChar*)"pname");
-            new_chord->notes[notes_i] = (MENG_Note*)calloc(1, sizeof(MENG_Note));
-            new_chord->notes[notes_i]->dur = 0;
-            new_chord->notes[notes_i]->oct = __TranslateOctaveByText((const char*) oct_name);
-            new_chord->notes[notes_i]->pname = __TranslatePitchByText((const char*) pname_name);
-            xmlFree(oct_name);
-            xmlFree(pname_name);
-            notes_i++;
-        }
-    }
-    xmlFree(dur_text);
-    return new_chord;
-}
-static MENG_Beam* __AnalyzeBeam(xmlNode* beam_node)
-{
-    if (beam_node == NULL) return NULL;
-    MENG_Beam* new_beam = (MENG_Beam*)calloc(1, sizeof(MENG_Beam));
-    unsigned int notes_count = 0;
-    unsigned int rests_count = 0;
-    unsigned int chords_count = 0;
-    for (xmlNode* cur = beam_node->children; cur != NULL; cur = cur->next)
-    {
-        if (cur->type == XML_ELEMENT_NODE && xmlStrcmp(cur->name, (const xmlChar *)"note") == 0)
-        {
-            notes_count++;
-        }
-        else if (cur->type == XML_ELEMENT_NODE && xmlStrcmp(cur->name, (const xmlChar *)"rest") == 0)
-        {
-            rests_count++;
-        }
-        else if (cur->type == XML_ELEMENT_NODE && xmlStrcmp(cur->name, (const xmlChar *)"chord") == 0)
-        {
-            chords_count++;
-        }
-    }
-    new_beam->notes_count = notes_count;
-    new_beam->rests_count = rests_count;
-    new_beam->chords_count = chords_count;
-    if (notes_count > 0)
-    {
-        new_beam->notes = (MENG_Note**)calloc(notes_count, sizeof(MENG_Note*));
-    }
-    if (rests_count > 0)
-    {
-        new_beam->rests = (MENG_Rest**)calloc(rests_count, sizeof(MENG_Rest*));
-    }
-    if (chords_count > 0)
-    {
-        new_beam->chords = (MENG_Chord**)calloc(chords_count, sizeof(MENG_Chord*));
-    }
-    unsigned int notes_i = 0;
-    unsigned int rests_i = 0;
-    unsigned int chords_i = 0;
-    unsigned int total_count = notes_count + rests_count + chords_count;
-    if (total_count > 0)
-    {
-        new_beam->order_count = total_count;
-        new_beam->order = (MENG_Order**)calloc(total_count, sizeof(MENG_Order*));
-    }
-    for (xmlNode* cur = beam_node->children; cur != NULL; cur = cur->next)
-    {
-        unsigned int total_i = notes_i + rests_i + chords_i;
-        if (cur->type == XML_ELEMENT_NODE && xmlStrcmp(cur->name, (const xmlChar *)"note") == 0)
-        {
-            xmlChar* dur_text = xmlGetProp(cur, (xmlChar*)"dur");
-            if (dur_text == NULL) return new_beam;
-            xmlChar* oct_text = xmlGetProp(cur, (xmlChar*)"oct");
-            if (oct_text == NULL) return new_beam;
-            xmlChar* pname_text = xmlGetProp(cur, (xmlChar*)"pname");
-            if (pname_text == NULL) return new_beam;
-            new_beam->notes[notes_i] = (MENG_Note*)calloc(1, sizeof(MENG_Note));
-            new_beam->notes[notes_i]->dur = __TranslateDurationByText((const char*)dur_text);
-            new_beam->notes[notes_i]->oct = __TranslateOctaveByText((const char*)oct_text);
-            new_beam->notes[notes_i]->pname = __TranslatePitchByText((const char*)pname_text);
-            xmlFree(oct_text);
-            xmlFree(pname_text);
-            new_beam->order[total_i] = (MENG_Order*)calloc(1, sizeof(MENG_Order));
-            new_beam->order[total_i]->type = MENG_TYPE_NOTE;
-            new_beam->order[total_i]->element.note = new_beam->notes[notes_i];
-            notes_i++;
-        }
-        else if (cur->type == XML_ELEMENT_NODE && xmlStrcmp(cur->name, (const xmlChar *)"rest") == 0)
-        {
-            xmlChar* dur_text = xmlGetProp(cur, (xmlChar*)"dur");
-            if (dur_text == NULL) return new_beam;
-            new_beam->rests[rests_i] = (MENG_Rest*)calloc(1, sizeof(MENG_Rest));
-            new_beam->rests[rests_i]->dur = __TranslateDurationByText((const char*)dur_text);
-            xmlFree(dur_text);
-            new_beam->order[total_i] = (MENG_Order*)calloc(1, sizeof(MENG_Order));
-            new_beam->order[total_i]->type = MENG_TYPE_REST;
-            new_beam->order[total_i]->element.rest = new_beam->rests[rests_i];
-            rests_i++;
-        }
-        else if (cur->type == XML_ELEMENT_NODE && xmlStrcmp(cur->name, (const xmlChar *)"chord") == 0)
-        {
-            new_beam->chords[chords_i] = __AnalyzeChord(cur);
-            new_beam->order[total_i] = (MENG_Order*)calloc(1, sizeof(MENG_Order));
-            new_beam->order[total_i]->type = MENG_TYPE_CHORD;
-            new_beam->order[total_i]->element.chord = new_beam->chords[chords_i];
-            chords_i++;
-        }
-    }
-    return new_beam;
-}
-
-
-char* MENG_OutputMeiAsChar(MENG_MEI mei)
+const char* MENG_OutputMeiAsChar(MENG_MEI* mei)
 {
     xmlDoc* doc = xmlNewDoc((xmlChar*)"1.0");
     xmlNode* root = xmlNewNode(NULL, (xmlChar*)"mei");
     xmlDocSetRootElement(doc, root);
 
-    // Set proccessing instruct. to the document
+    //Set proccessing instruct. to the document
     xmlNode* pi1 = xmlNewPI((xmlChar*)"xml-model", (xmlChar*)"href=\"https://music-encoding.org/schema/5.1/mei-all.rng\" ""type=\"application/xml\" ""schematypens=\"http://relaxng.org/ns/structure/1.0\"");
     xmlNode* pi2 = xmlNewPI((xmlChar*)"xml-model", (xmlChar*)"href=\"https://music-encoding.org/schema/5.1/mei-all.rng\" ""type=\"application/xml\" ""schematypens=\"http://purl.oclc.org/dsdl/schematron\"");;
     xmlAddPrevSibling(root, pi1);
     xmlAddPrevSibling(root, pi2);
-
+    
+    
     // Add namespace and mei version
     xmlNs* ns = xmlNewNs(root, (xmlChar*)"http://www.music-encoding.org/ns/mei", NULL);
     xmlSetNs(root, ns);
@@ -634,16 +308,16 @@ char* MENG_OutputMeiAsChar(MENG_MEI mei)
         xmlNode* meiHead = xmlNewChild(root, NULL, (xmlChar*)"meiHead", NULL);
         xmlNode* fileDesc = xmlNewChild(meiHead, NULL, (xmlChar*)"fileDesc", NULL);
         xmlNode* titleStmt = xmlNewChild(fileDesc, NULL, (xmlChar*)"titleStmt", NULL);
-        xmlNode* title = xmlNewChild(titleStmt, NULL, (xmlChar*)"title", (char*)mei.meiHead.fileDesc.titleStmt.title);
+        xmlNode* title = xmlNewChild(titleStmt, NULL, (xmlChar*)"title", (char*)mei->meiHead.fileDesc.titleStmt.title);
         xmlNode* respStmt = xmlNewChild(titleStmt, NULL, (xmlChar*)"respStmt", NULL);
-        if (mei.meiHead.fileDesc.titleStmt.respStmt.persName != NULL && mei.meiHead.fileDesc.titleStmt.respStmt.persName_count > 0)
+        if (mei->meiHead.fileDesc.titleStmt.respStmt.persName != NULL && mei->meiHead.fileDesc.titleStmt.respStmt.persName_count > 0)
         {
-            for (unsigned int i = 0; i < mei.meiHead.fileDesc.titleStmt.respStmt.persName_count; i++)
+            for (unsigned int i = 0; i < mei->meiHead.fileDesc.titleStmt.respStmt.persName_count; i++)
             {
-                if (mei.meiHead.fileDesc.titleStmt.respStmt.persName[i] != NULL)
+                if (mei->meiHead.fileDesc.titleStmt.respStmt.persName[i] != NULL)
                 {
-                    xmlNode* pers = xmlNewChild(respStmt, NULL, (xmlChar*)"persName", mei.meiHead.fileDesc.titleStmt.respStmt.persName[i]->name);
-                    xmlNewProp(pers, (xmlChar*)"role", (xmlChar*)__TranslateRoleToText(mei.meiHead.fileDesc.titleStmt.respStmt.persName[i]->role));
+                    xmlNode* pers = xmlNewChild(respStmt, NULL, (xmlChar*)"persName", mei->meiHead.fileDesc.titleStmt.respStmt.persName[i]->name);
+                    xmlNewProp(pers, (xmlChar*)"role", (xmlChar*)__TranslateRoleToText(mei->meiHead.fileDesc.titleStmt.respStmt.persName[i]->role));
                 }
                 else
                 {
@@ -652,73 +326,167 @@ char* MENG_OutputMeiAsChar(MENG_MEI mei)
                 }
             }
         }
-        if (mei.meiHead.fileDesc.titleStmt.respStmt.corpName != NULL && mei.meiHead.fileDesc.titleStmt.respStmt.corpName_count > 0)
+        if (mei->meiHead.fileDesc.titleStmt.respStmt.corpName != NULL && mei->meiHead.fileDesc.titleStmt.respStmt.corpName_count > 0)
         {
-            for (unsigned int i = 0; i < mei.meiHead.fileDesc.titleStmt.respStmt.corpName_count; i++)
+            for (unsigned int i = 0; i < mei->meiHead.fileDesc.titleStmt.respStmt.corpName_count; i++)
             {
-                if (mei.meiHead.fileDesc.titleStmt.respStmt.corpName[i] != NULL)
+                if (mei->meiHead.fileDesc.titleStmt.respStmt.corpName[i] != NULL)
                 {
-                    xmlNode* corp = xmlNewChild(respStmt, NULL, (xmlChar*)"corpName", mei.meiHead.fileDesc.titleStmt.respStmt.corpName[i]->name);
-                    xmlNewProp(corp, (xmlChar*)"role", (xmlChar*)__TranslateRoleToText(mei.meiHead.fileDesc.titleStmt.respStmt.corpName[i]->role));
+                    xmlNode* corp = xmlNewChild(respStmt, NULL, (xmlChar*)"corpName", mei->meiHead.fileDesc.titleStmt.respStmt.corpName[i]->name);
+                    xmlNewProp(corp, (xmlChar*)"role", (xmlChar*)__TranslateRoleToText(mei->meiHead.fileDesc.titleStmt.respStmt.corpName[i]->role));
                 }
                 else
                 {
                     printf("[MENG] Corrupted MEI struct\n");
+                    xmlFreeDoc(doc);
                     return NULL;
                 }
             }
         }
         xmlNode* pubStmt = xmlNewChild(fileDesc, NULL, (xmlChar*)"pubStmt", NULL);
-        xmlNode* publisher = xmlNewChild(pubStmt, NULL, (xmlChar*)"publisher", (xmlChar*)mei.meiHead.fileDesc.pubStmt.publisher);
-        xmlNode* pubPlace = xmlNewChild(pubStmt, NULL, (xmlChar*)"pubPlace", (xmlChar*)mei.meiHead.fileDesc.pubStmt.pubPlace);
-        xmlNode* date = xmlNewChild(pubStmt, NULL, (xmlChar*)"date", (xmlChar*)mei.meiHead.fileDesc.pubStmt.date);
-        xmlNode* availability = xmlNewChild(pubStmt, NULL, (xmlChar*)"availability", (xmlChar*)mei.meiHead.fileDesc.pubStmt.availability);
+        xmlNode* publisher = xmlNewChild(pubStmt, NULL, (xmlChar*)"publisher", (xmlChar*)mei->meiHead.fileDesc.pubStmt.publisher);
+        xmlNode* pubPlace = xmlNewChild(pubStmt, NULL, (xmlChar*)"pubPlace", (xmlChar*)mei->meiHead.fileDesc.pubStmt.pubPlace);
+        xmlNode* date = xmlNewChild(pubStmt, NULL, (xmlChar*)"date", (xmlChar*)mei->meiHead.fileDesc.pubStmt.date);
+        xmlNode* availability = xmlNewChild(pubStmt, NULL, (xmlChar*)"availability", (xmlChar*)mei->meiHead.fileDesc.pubStmt.availability);
         xmlNode* encodingDesc = xmlNewChild(meiHead, NULL, (xmlChar*)"encodingDesc", NULL);
         xmlNode* projectDesc = xmlNewChild(encodingDesc, NULL, (xmlChar*)"projectDesc", NULL);
-        xmlNode* projectDesc_p = xmlNewChild(projectDesc, NULL, (xmlChar*)"p", (xmlChar*)mei.meiHead.encodingDesc.projectDesc.desc);
+        xmlNode* projectDesc_p = xmlNewChild(projectDesc, NULL, (xmlChar*)"p", (xmlChar*)mei->meiHead.encodingDesc.projectDesc.desc);
         xmlNode* revisionDesc = xmlNewChild(meiHead, NULL, (xmlChar*)"revisionDesc", NULL);
-        if (mei.meiHead.revisionDesc.changes != NULL)
+        if (mei->meiHead.revisionDesc.changes != NULL)
         {
-            for (unsigned int i = 0; i < mei.meiHead.revisionDesc.changes_count; i++)
+            for (unsigned int i = 0; i < mei->meiHead.revisionDesc.changes_count; i++)
             {
-                if (mei.meiHead.revisionDesc.changes[i] != NULL)
+                if (mei->meiHead.revisionDesc.changes[i] != NULL)
                 {
                     xmlNode* change = xmlNewChild(revisionDesc, NULL, (xmlChar*)"change", NULL);
-                    xmlChar* n_text = __uintIntoXmlChar(mei.meiHead.revisionDesc.changes[i]->n);
+                    xmlChar* n_text = __uintIntoXmlChar(mei->meiHead.revisionDesc.changes[i]->n);
                     xmlNewProp(change, (xmlChar*)"n", n_text);
                     xmlFree(n_text);
-                    xmlNewProp(change, (xmlChar*)"isodate", (xmlChar*)mei.meiHead.revisionDesc.changes[i]->isodate);
+                    xmlNewProp(change, (xmlChar*)"isodate", (xmlChar*)mei->meiHead.revisionDesc.changes[i]->isodate);
                     xmlNode* change_respStmt = xmlNewChild(change, NULL, (xmlChar*)"respStmt", NULL);
-                    if (mei.meiHead.revisionDesc.changes[i]->respStmt.persName != NULL && mei.meiHead.revisionDesc.changes[i]->respStmt.persName_count > 0)
+                    if (mei->meiHead.revisionDesc.changes[i]->respStmt.persName != NULL && mei->meiHead.revisionDesc.changes[i]->respStmt.persName_count > 0)
                     {
-                        for (unsigned int j = 0; j < mei.meiHead.revisionDesc.changes[i]->respStmt.persName_count; j++)
+                        for (unsigned int j = 0; j < mei->meiHead.revisionDesc.changes[i]->respStmt.persName_count; j++)
                         {
-                            if (mei.meiHead.revisionDesc.changes[i]->respStmt.persName[j] != NULL)
+                            if (mei->meiHead.revisionDesc.changes[i]->respStmt.persName[j] != NULL)
                             {
-                                xmlNode* pers = xmlNewChild(change_respStmt, NULL, (xmlChar*)"persName", mei.meiHead.revisionDesc.changes[i]->respStmt.persName[j]->name);
-                                xmlNewProp(pers, (xmlChar*)"role", (xmlChar*)__TranslateRoleToText(mei.meiHead.revisionDesc.changes[i]->respStmt.persName[j]->role));
+                                xmlNode* pers = xmlNewChild(change_respStmt, NULL, (xmlChar*)"persName", mei->meiHead.revisionDesc.changes[i]->respStmt.persName[j]->name);
+                                xmlNewProp(pers, (xmlChar*)"role", (xmlChar*)__TranslateRoleToText(mei->meiHead.revisionDesc.changes[i]->respStmt.persName[j]->role));
                             }
                         }
                     }
-                    if (mei.meiHead.revisionDesc.changes[i]->respStmt.corpName != NULL && mei.meiHead.revisionDesc.changes[i]->respStmt.corpName_count > 0)
+                    if (mei->meiHead.revisionDesc.changes[i]->respStmt.corpName != NULL && mei->meiHead.revisionDesc.changes[i]->respStmt.corpName_count > 0)
                     {
-                        for (unsigned int j = 0; j < mei.meiHead.revisionDesc.changes[i]->respStmt.corpName_count; j++)
+                        for (unsigned int j = 0; j < mei->meiHead.revisionDesc.changes[i]->respStmt.corpName_count; j++)
                         {
-                            if (mei.meiHead.revisionDesc.changes[i]->respStmt.corpName[j] != NULL)
+                            if (mei->meiHead.revisionDesc.changes[i]->respStmt.corpName[j] != NULL)
                             {
-                                xmlNode* corp = xmlNewChild(change_respStmt, NULL, (xmlChar*)"corpName", mei.meiHead.revisionDesc.changes[i]->respStmt.corpName[j]->name);
-                                xmlNewProp(corp, (xmlChar*)"role", (xmlChar*)__TranslateRoleToText(mei.meiHead.revisionDesc.changes[i]->respStmt.corpName[j]->role));
+                                xmlNode* corp = xmlNewChild(change_respStmt, NULL, (xmlChar*)"corpName", mei->meiHead.revisionDesc.changes[i]->respStmt.corpName[j]->name);
+                                xmlNewProp(corp, (xmlChar*)"role", (xmlChar*)__TranslateRoleToText(mei->meiHead.revisionDesc.changes[i]->respStmt.corpName[j]->role));
                             }
                         }
                     }
                     xmlNode* changeDesc = xmlNewChild(change, NULL, (xmlChar*)"changeDesc", NULL);
-                    xmlNode* changeDesc_p = xmlNewChild(changeDesc, NULL, (xmlChar*)"p", (xmlChar*)mei.meiHead.revisionDesc.changes[i]->changeDesc);
+                    xmlNode* changeDesc_p = xmlNewChild(changeDesc, NULL, (xmlChar*)"p", (xmlChar*)mei->meiHead.revisionDesc.changes[i]->changeDesc);
                 }
             }
         }
         else
         {
             printf("[MENG] Corrupted MEI struct\n");
+            xmlFreeDoc(doc);
+            return NULL;
+        }
+    }
+
+    // Fill Music
+    {
+        xmlNode* meiHead = xmlNewChild(root, NULL, (xmlChar*)"music", NULL);
+        xmlNode* body = xmlNewChild(meiHead, NULL, (xmlChar*)"body", NULL);
+        xmlNode* mdiv = xmlNewChild(body, NULL, (xmlChar*)"mdiv", NULL);
+        xmlNode* score = xmlNewChild(mdiv, NULL, (xmlChar*)"score", NULL);
+        xmlNode* scoreDef = xmlNewChild(score, NULL, (xmlChar*)"scoreDef", NULL);
+        xmlNode* staffGrp = xmlNewChild(scoreDef, NULL, (xmlChar*)"staffGrp", NULL);
+        xmlNewProp(staffGrp, (xmlChar*)"bar.thru", mei->music.scoreDef.barthru ? (xmlChar*)"true" : (xmlChar*)"false");
+        xmlNode* grpSym = xmlNewChild(staffGrp, NULL, (xmlChar*)"grpSym", NULL);
+        xmlNewProp(grpSym, (xmlChar*)"symbol", (xmlChar*)mei->music.scoreDef.grpSym);
+        xmlNode* label = xmlNewChild(staffGrp, NULL, (xmlChar*)"label", (xmlChar*)mei->music.scoreDef.label);
+        xmlNode* labelAbbr = xmlNewChild(staffGrp, NULL, (xmlChar*)"labelAbbr", (xmlChar*)mei->music.scoreDef.labelAbbr);
+        xmlNode* instrDef = xmlNewChild(staffGrp, NULL, (xmlChar*)"instrDef", NULL);
+        char* midi_channel_text = malloc(20);
+        sprintf(midi_channel_text, "%d", mei->music.scoreDef.instrDef.midi_channel);
+        xmlNewProp(instrDef, (xmlChar*)"midi.channel", (xmlChar*)midi_channel_text);
+        free(midi_channel_text);
+        char* midi_instrnum_text = malloc(20);
+        sprintf(midi_instrnum_text, "%d", mei->music.scoreDef.instrDef.midi_instrnum);
+        xmlNewProp(instrDef, (xmlChar*)"midi.instrnum", (xmlChar*)midi_instrnum_text);
+        free(midi_instrnum_text);
+
+        xmlNode* staffDef1 = xmlNewChild(staffGrp, NULL, (xmlChar*)"staffDef", NULL);
+        xmlNewProp(staffDef1, (xmlChar*)"n", (xmlChar*)"1");
+        char* lines1 = malloc(20);
+        sprintf(lines1, "%d", mei->music.scoreDef.staffDef1.lines);
+        xmlNewProp(staffDef1, (xmlChar*)"lines", (xmlChar*)lines1);
+        free(lines1);
+        xmlNode* clef1 = xmlNewChild(staffDef1, NULL, (xmlChar*)"clef", NULL);
+        char* shape_text1 = malloc(2);
+        sprintf(shape_text1, "%c", mei->music.scoreDef.staffDef1.clef.shape);
+        xmlNewProp(clef1, (xmlChar*)"shape", (xmlChar*)shape_text1);
+        char* shape1 = malloc(20);
+        sprintf(shape1, "%d", mei->music.scoreDef.staffDef1.clef.line);
+        xmlNewProp(clef1, (xmlChar*)"line", (xmlChar*)shape1);
+        free(shape1);
+        xmlNode* keySig1 = xmlNewChild(staffDef1, NULL, (xmlChar*)"keySig", NULL);
+        xmlNewProp(keySig1, (xmlChar*)"sig", (xmlChar*)mei->music.scoreDef.staffDef1.keySig);
+        xmlNode* meterSig1 = xmlNewChild(staffDef1, NULL, (xmlChar*)"meterSig", NULL);
+        char* count1 = malloc(20);
+        char* unit1 = malloc(20);
+        sprintf(count1, "%d", mei->music.scoreDef.staffDef1.meterSig.count);
+        sprintf(unit1, "%d", mei->music.scoreDef.staffDef1.meterSig.unit);
+        xmlNewProp(meterSig1, (xmlChar*)"count", (xmlChar*)count1);
+        xmlNewProp(meterSig1, (xmlChar*)"unit", (xmlChar*)unit1);
+        free(count1);
+        free(unit1);
+
+        xmlNode* staffDef2 = xmlNewChild(staffGrp, NULL, (xmlChar*)"staffDef", NULL);
+        xmlNewProp(staffDef2, (xmlChar*)"n", (xmlChar*)"2");
+        char* lines2 = malloc(20);
+        sprintf(lines2, "%d", mei->music.scoreDef.staffDef2.lines);
+        xmlNewProp(staffDef2, (xmlChar*)"lines", (xmlChar*)lines2);
+        free(lines2);
+        xmlNode* clef2 = xmlNewChild(staffDef2, NULL, (xmlChar*)"clef", NULL);
+        char* shape_text2 = malloc(2);
+        sprintf(shape_text2, "%c", mei->music.scoreDef.staffDef2.clef.shape);
+        xmlNewProp(clef2, (xmlChar*)"shape", (xmlChar*)shape_text2);
+        char* shape2 = malloc(20);
+        sprintf(shape2, "%d", mei->music.scoreDef.staffDef2.clef.line);
+        xmlNewProp(clef2, (xmlChar*)"line", (xmlChar*)shape2);
+        free(shape2);
+        xmlNode* keySig2 = xmlNewChild(staffDef2, NULL, (xmlChar*)"keySig", NULL);
+        xmlNewProp(keySig2, (xmlChar*)"sig", (xmlChar*)mei->music.scoreDef.staffDef2.keySig);
+        xmlNode* meterSig2 = xmlNewChild(staffDef2, NULL, (xmlChar*)"meterSig", NULL);
+        char* count2 = malloc(20);
+        char* unit2 = malloc(20);
+        sprintf(count2, "%d", mei->music.scoreDef.staffDef2.meterSig.count);
+        sprintf(unit2, "%d", mei->music.scoreDef.staffDef2.meterSig.unit);
+        xmlNewProp(meterSig2, (xmlChar*)"count", (xmlChar*)count2);
+        xmlNewProp(meterSig2, (xmlChar*)"unit", (xmlChar*)unit2);
+        free(count2);
+        free(unit2);
+
+        xmlNode* section = xmlNewChild(score, NULL, (xmlChar*)"section", NULL);
+        for (unsigned int i = 0; i < mei->music.section.measures_count; i++)
+        {
+            xmlNode* measure = xmlNewChild(section, NULL, (xmlChar*)"measure", NULL);
+            xmlNs* xml_ns = xmlSearchNsByHref(doc, measure, (xmlChar*)"http://www.w3.org/XML/1998/namespace");
+            if (mei->music.section.measures[i] != NULL)
+            {
+                char* buffer_id = malloc(20);
+                sprintf(buffer_id, "m%d", i + 1);
+                xmlNewNsProp(measure, xml_ns, (xmlChar*)"id", (xmlChar*)buffer_id);
+                __ProcessMeasureToSVG(measure, mei->music.section.measures[i], i, &mei->music.section, doc);
+                free(buffer_id);
+            }
         }
     }
 
@@ -726,10 +494,233 @@ char* MENG_OutputMeiAsChar(MENG_MEI mei)
     xmlChar* xmlbuff = NULL;
     int buffersize = 0;
     xmlDocDumpFormatMemoryEnc(doc, &xmlbuff, &buffersize, "UTF-8", 1);
+    xmlSaveFormatFileEnc("MM_Out.mei", doc, "UTF-8", 1);
 
     xmlFreeDoc(doc);
 
-    return (char*)xmlbuff;
+    return (const char*)xmlbuff;
+}
+
+static void __ProcessMeasureToSVG(xmlNode* measure_node, MENG_Measure* measure, unsigned int measure_index, MENG_Section* section, xmlDoc* doc)
+{
+    xmlNs* xml_ns = xmlSearchNsByHref(doc, measure_node, (xmlChar*)"http://www.w3.org/XML/1998/namespace");
+    xmlNode* staff1 = xmlNewChild(measure_node, NULL, (xmlChar*)"staff", NULL);
+    xmlNewProp(staff1, "n", (xmlChar*)"1");
+    unsigned int indices1[2] = {measure_index, 0};
+    __ProcessStaffToSVG(staff1, &measure->staffs[0], indices1, doc);
+    xmlNode* staff2 = xmlNewChild(measure_node, NULL, (xmlChar*)"staff", NULL);
+    xmlNewProp(staff2, "n", (xmlChar*)"2");
+    unsigned int indices2[2] = {measure_index, 1};
+    __ProcessStaffToSVG(staff2, &measure->staffs[1], indices2, doc);
+    if (measure->tempo.bpm != 0)
+    {
+        char* buffer = malloc(20);
+        xmlNode* tempo_node = xmlNewChild(measure_node, NULL, (xmlChar*)"tempo", NULL);
+        sprintf(buffer, "m%dt", measure_index + 1);
+        xmlNewNsProp(tempo_node, xml_ns, (xmlChar*)"id", (xmlChar*)buffer);
+        sprintf(buffer, "%d", measure->tempo.bpm);
+        xmlNewProp(tempo_node, "midi.bpm", (xmlChar*)buffer);
+        sprintf(buffer, "%d", measure->tempo.tstamp);
+        xmlNewProp(tempo_node, "tstamp", (xmlChar*)buffer);
+        char* place_text = __TranslateTempoPlacementToText(measure->tempo.place);
+        xmlNewProp(tempo_node, "place", (xmlChar*)place_text);
+        sprintf(buffer, "%d", measure->tempo.staff);
+        xmlNewProp(tempo_node, "staff", (xmlChar*)buffer);
+
+        xmlNode* render_node = xmlNewChild(tempo_node, NULL, (xmlChar*)"rend", (xmlChar*)"♩");
+        xmlNewProp(render_node, (xmlChar*)"glyph.auth", (xmlChar*)"smufl");
+
+        sprintf(buffer, " = %d", measure->tempo.bpm);
+        xmlNode* text_node = xmlNewText((xmlChar*)buffer);
+        xmlAddNextSibling(render_node, text_node);
+
+        free(buffer);
+        free(place_text);
+    }
+    if (measure_index == 0)
+    {
+        for (unsigned int i = 0; i < section->ties_count; i++)
+        {
+            if (section->ties[i] != NULL)
+            {
+                xmlNode* tie = xmlNewChild(measure_node, NULL, (xmlChar*)"tie", NULL);
+                xmlNewProp(tie, "startid", (xmlChar*)section->ties[i]->startid);
+                xmlNewProp(tie, "endid", (xmlChar*)section->ties[i]->endid);
+            }
+        }
+    }
+}
+
+static void __ProcessStaffToSVG(xmlNode* staff_node, MENG_Staff* staff, unsigned int indices[2], xmlDoc* doc)
+{
+    for (unsigned int i = 0; i < staff->layers_count; i++)
+    {
+        if (staff->layers[i] != NULL)
+        {
+            xmlNode* layer_node = xmlNewChild(staff_node, NULL, (xmlChar*)"layer", NULL);
+            char* n_text = malloc(20);
+            sprintf(n_text, "%d", i + 1);
+            xmlNewProp(layer_node, "n", (xmlChar*)n_text);
+            free(n_text);
+            unsigned int new_indices[3] = {indices[0], indices[1], i};
+            __ProcessLayerToSVG(layer_node, staff->layers[i], new_indices, doc);
+        }
+    }
+}
+
+static void __ProcessLayerToSVG(xmlNode* layer_node, MENG_Layer* layer, unsigned int indices[3], xmlDoc* doc)
+{
+    unsigned int notes_i = 0;
+    unsigned int rests_i = 0;
+    unsigned int chords_i = 0;
+    unsigned int beams_i = 0;
+    xmlNs* xml_ns = xmlSearchNsByHref(doc, layer_node, (xmlChar*)"http://www.w3.org/XML/1998/namespace");
+    for (unsigned int i = 0; i < layer->order_count; i++)
+    {
+        if (layer->order[i] != NULL)
+        {
+            if (layer->order[i]->type == MENG_TYPE_NOTE)
+            {
+                xmlNode* note_node = xmlNewChild(layer_node, NULL, (xmlChar*)"note", NULL);
+                char* buffer = malloc(20);
+                sprintf(buffer, "m%ds%dl%dn%d", indices[0] + 1, indices[1] + 1, indices[2] + 1, notes_i + 1);
+                xmlNewNsProp(note_node, xml_ns, (xmlChar*)"id", (xmlChar*)buffer);
+                char pname_char = __TranslatePicthToText(layer->order[i]->element.note->pname);
+                sprintf(buffer, "%c", pname_char);
+                xmlNewProp(note_node, "pname", (xmlChar*)buffer);
+                sprintf(buffer, "%d", layer->order[i]->element.note->oct);
+                xmlNewProp(note_node, "oct", (xmlChar*)buffer);
+                sprintf(buffer, "%d", layer->order[i]->element.note->dur);
+                xmlNewProp(note_node, "dur", (xmlChar*)buffer);
+                free(buffer);
+                notes_i++;
+            }
+            else if (layer->order[i]->type == MENG_TYPE_REST)
+            {
+                xmlNode* rest_node = xmlNewChild(layer_node, NULL, (xmlChar*)"rest", NULL);
+                char* buffer = malloc(20);
+                sprintf(buffer, "m%ds%dl%dr%d", indices[0] + 1, indices[1] + 1, indices[2] + 1, rests_i + 1);
+                xmlNewNsProp(rest_node, xml_ns, (xmlChar*)"id", (xmlChar*)buffer);
+                sprintf(buffer, "%d", layer->order[i]->element.rest->dur);
+                xmlNewProp(rest_node, "dur", (xmlChar*)buffer);
+                free(buffer);
+                rests_i++;
+            }
+            else if (layer->order[i]->type == MENG_TYPE_CHORD)
+            {
+                xmlNode* chord_node = xmlNewChild(layer_node, NULL, (xmlChar*)"chord", NULL);
+                char* buffer = malloc(20);
+                sprintf(buffer, "m%ds%dl%dc%d", indices[0] + 1, indices[1] + 1, indices[2] + 1, chords_i + 1);
+                xmlNewNsProp(chord_node, xml_ns, (xmlChar*)"id", (xmlChar*)buffer);
+                sprintf(buffer, "%d", layer->order[i]->element.chord->dur);
+                xmlNewProp(chord_node, "dur", (xmlChar*)buffer);
+                free(buffer);
+                unsigned int indices_new[4] = {indices[0], indices[1], indices[2], chords_i};
+                __ProcessChordToSVG(chord_node, layer->order[i]->element.chord, indices_new, doc);
+                chords_i++;
+            }
+            else if (layer->order[i]->type == MENG_TYPE_BEAM)
+            {
+                xmlNode* beam_node = xmlNewChild(layer_node, NULL, (xmlChar*)"beam", NULL);
+                char* buffer = malloc(20);
+                sprintf(buffer, "m%ds%dl%db%d", indices[0] + 1, indices[1] + 1, indices[2] + 1, beams_i + 1);
+                xmlNewNsProp(beam_node, xml_ns, (xmlChar*)"id", (xmlChar*)buffer);
+                free(buffer);
+                unsigned int indices_new[4] = {indices[0], indices[1], indices[2], beams_i};
+                __ProcessBeamToSVG(beam_node, layer->order[i]->element.beam, indices_new, doc);
+                beams_i++;
+            }
+        }
+    }
+}
+
+static void __ProcessChordToSVG(xmlNode* chord_node, MENG_Chord* chord, unsigned int indices[4], xmlDoc* doc)
+{
+    xmlNs* xml_ns = xmlSearchNsByHref(doc, chord_node, (xmlChar*)"http://www.w3.org/XML/1998/namespace");
+    for (unsigned int i = 0; i < chord->notes_count; i++)
+    {
+        if (chord->notes[i] != NULL)
+        {
+            xmlNode* note_node = xmlNewChild(chord_node, NULL, (xmlChar*)"note", NULL);
+            char* buffer = malloc(20);
+            sprintf(buffer, "m%ds%dl%dc%dn%d", indices[0] + 1, indices[1] + 1, indices[2] + 1, indices[3] + 1, i + 1);
+            xmlNewNsProp(note_node, xml_ns, (xmlChar*)"id", (xmlChar*)buffer);
+            char pname_char = __TranslatePicthToText(chord->notes[i]->pname);
+            sprintf(buffer, "%c", pname_char);
+            xmlNewProp(note_node, "pname", (xmlChar*)buffer);
+            sprintf(buffer, "%d", chord->notes[i]->oct);
+            xmlNewProp(note_node, "oct", (xmlChar*)buffer);
+            free(buffer);
+        }
+    }
+}
+
+static void __ProcessBeamToSVG(xmlNode* beam_node, MENG_Beam* beam, unsigned int indices[4], xmlDoc* doc)
+{
+    unsigned int notes_i = 0;
+    unsigned int rests_i = 0;
+    unsigned int chords_i = 0;
+    xmlNs* xml_ns = xmlSearchNsByHref(doc, beam_node, (xmlChar*)"http://www.w3.org/XML/1998/namespace");
+    for (unsigned int i = 0; i < beam->order_count; i++)
+    {
+        if (beam->order[i] != NULL)
+        {
+            if (beam->order[i]->type == MENG_TYPE_NOTE)
+            {
+                xmlNode* note_node = xmlNewChild(beam_node, NULL, (xmlChar*)"note", NULL);
+                char* buffer = malloc(40);
+                sprintf(buffer, "m%ds%dl%db%dn%d", indices[0] + 1, indices[1] + 1, indices[2] + 1, indices[3] + 1, notes_i + 1);
+                xmlNewNsProp(note_node, xml_ns, (xmlChar*)"id", (xmlChar*)buffer);
+                char pname_char = __TranslatePicthToText(beam->order[i]->element.note->pname);
+                sprintf(buffer, "%c", pname_char);
+                xmlNewProp(note_node, "pname", (xmlChar*)buffer);
+                sprintf(buffer, "%d", beam->order[i]->element.note->oct);
+                xmlNewProp(note_node, "oct", (xmlChar*)buffer);
+                sprintf(buffer, "%d", beam->order[i]->element.note->dur);
+                xmlNewProp(note_node, "dur", (xmlChar*)buffer);
+                free(buffer);
+                notes_i++;
+            }
+            else if (beam->order[i]->type == MENG_TYPE_REST)
+            {
+                xmlNode* rest_node = xmlNewChild(beam_node, NULL, (xmlChar*)"rest", NULL);
+                char* buffer = malloc(20);
+                sprintf(buffer, "m%ds%dl%db%dr%d", indices[0] + 1, indices[1] + 1, indices[2] + 1, indices[3] + 1, rests_i + 1);
+                xmlNewNsProp(rest_node, xml_ns, (xmlChar*)"id", (xmlChar*)buffer);
+                sprintf(buffer, "%d", beam->order[i]->element.rest->dur);
+                xmlNewProp(rest_node, "dur", (xmlChar*)buffer);
+                free(buffer);
+                rests_i++;
+            }
+            else if (beam->order[i]->type == MENG_TYPE_CHORD)
+            {
+                xmlNode* chord_node = xmlNewChild(beam_node, NULL, (xmlChar*)"chord", NULL);
+                char* buffer = malloc(20);
+                sprintf(buffer, "m%ds%dl%db%dc%d", indices[0] + 1, indices[1] + 1, indices[2] + 1, indices[3] + 1, chords_i + 1);
+                xmlNewNsProp(chord_node, xml_ns, (xmlChar*)"id", (xmlChar*)buffer);
+                sprintf(buffer, "%d", beam->order[i]->element.chord->dur);
+                xmlNewProp(chord_node, "dur", (xmlChar*)buffer);
+                free(buffer);
+                for (unsigned int j = 0; j < beam->order[i]->element.chord->notes_count; j++)
+                {
+                    if (beam->order[i]->element.chord->notes[j] != NULL)
+                    {
+                        xmlNode* note_node = xmlNewChild(chord_node, NULL, (xmlChar*)"note", NULL);
+                        char* buffer = malloc(20);
+                        sprintf(buffer, "m%ds%dl%db%dc%dn%d", indices[0] + 1, indices[1] + 1, indices[2] + 1, indices[3] + 1, chords_i + 1, j + 1);
+                        xmlNewNsProp(note_node, xml_ns, (xmlChar*)"id", (xmlChar*)buffer);
+                        char pname_char = __TranslatePicthToText(beam->order[i]->element.chord->notes[j]->pname);
+                        sprintf(buffer, "%c", pname_char);
+                        xmlNewProp(note_node, "pname", (xmlChar*)buffer);
+                        sprintf(buffer, "%d", beam->order[i]->element.chord->notes[j]->oct);
+                        xmlNewProp(note_node, "oct", (xmlChar*)buffer);
+                        free(buffer);
+                    }
+                }
+                chords_i++;
+            }
+        }
+    }
 }
 
 static void __PrintXml(MENG_MeiXml xml)
@@ -822,7 +813,7 @@ void MENG_PrintMEI(MENG_MEI mei)
     printf("│   ├──[grpSym]: %s\n", mei.music.scoreDef.grpSym);
     printf("│   ├──[label]: %s\n", mei.music.scoreDef.label);
     printf("│   ├──[labelAbbr]: %s\n", mei.music.scoreDef.labelAbbr);
-    printf("│   ├──[instrDef midi.channel=%d midi.instrnum=%d midi_volume=\"%d%%\"]\n", mei.music.scoreDef.instrDef.midi_channel, mei.music.scoreDef.instrDef.midi_instrnum, mei.music.scoreDef.instrDef.midi_volume);
+    printf("│   ├──[instrDef midi.channel=%d midi.instrnum=%d]\n", mei.music.scoreDef.instrDef.midi_channel, mei.music.scoreDef.instrDef.midi_instrnum);
     printf("│   ├──[staffDef1 n=%d (should=1) lines=%d]\n", mei.music.scoreDef.staffDef1.n, mei.music.scoreDef.staffDef1.lines);
     printf("│   │   ├──[clef]: shape: %c line: %d\n", mei.music.scoreDef.staffDef1.clef.shape, mei.music.scoreDef.staffDef1.clef.line);
     printf("│   │   ├──[keySig]: %s\n", mei.music.scoreDef.staffDef1.keySig);
@@ -1420,4 +1411,394 @@ static MENG_Pitch __TranslatePitchByText(const char* pitch_text)
         return MENG_PITCH_B;
     else
         return -1;
+}
+
+static void __AnalyzeMeasure(xmlNode* measure_node, MENG_Measure* measure, MENG_MEI* mei)
+{
+    if (measure == NULL || measure_node == NULL) return;
+    for (xmlNode* cur = measure_node->children; cur != NULL; cur = cur->next)
+    {
+        if (cur->type == XML_ELEMENT_NODE && xmlStrcmp(cur->name, (const xmlChar *)"tempo") == 0)
+        {
+            xmlChar* bpm = xmlGetProp(cur, (const xmlChar*)"midi.bpm");
+            if (bpm == NULL) return;
+            xmlChar* tstamp = xmlGetProp(cur, (const xmlChar*)"tstamp");
+            if (tstamp == NULL) return;
+            xmlChar* place = xmlGetProp(cur, (const xmlChar*)"place");
+            if (place == NULL) return;
+            xmlChar* staff = xmlGetProp(cur, (const xmlChar*)"staff");
+            if (staff == NULL) return;
+            measure->tempo.bpm = strtol((const char*)bpm, NULL, 10);
+            measure->tempo.tstamp = strtol((const char*)tstamp, NULL, 10);
+            measure->tempo.place = __TranslateTempoPlacementByText((char*)place);
+            measure->tempo.staff = strtol((const char*)staff, NULL, 10);
+            xmlFree(bpm);
+            xmlFree(tstamp);
+            xmlFree(place);
+            xmlFree(staff);
+        }
+        else if (cur->type == XML_ELEMENT_NODE && xmlStrcmp(cur->name, (const xmlChar *)"tie") == 0)
+        {
+            if (mei->music.section.ties == NULL)
+            {
+                mei->music.section.ties = (MENG_Tie**)calloc(1, sizeof(MENG_Tie*));
+                mei->music.section.ties_count = 1;
+            }
+            else
+            {
+                mei->music.section.ties_count++;
+                mei->music.section.ties = (MENG_Tie**)realloc(mei->music.section.ties, mei->music.section.ties_count * sizeof(MENG_Tie*));
+            }
+            mei->music.section.ties[mei->music.section.ties_count - 1] = (MENG_Tie*)calloc(1, sizeof(MENG_Tie));
+            xmlChar* startid = xmlGetProp(cur, (xmlChar*)"startid");
+            if (startid == NULL) return;
+            xmlChar* endid = xmlGetProp(cur, (xmlChar*)"endid");
+            if (endid == NULL) return;
+            mei->music.section.ties[mei->music.section.ties_count - 1]->startid = strdup(startid);
+            mei->music.section.ties[mei->music.section.ties_count - 1]->endid = strdup(endid);
+            xmlFree(startid);
+            xmlFree(endid);
+        }
+        else if (cur->type == XML_ELEMENT_NODE && xmlStrcmp(cur->name, (const xmlChar *)"staff") == 0)
+        {
+            xmlChar* n = xmlGetProp(cur, (xmlChar*)"n");
+            if (n == NULL) return;
+            unsigned int n_num = strtol((const char*)n, NULL, 10);
+            if (n_num == 1)
+            {
+                __AnalyzeStaff(cur, &measure->staffs[0]);
+            }
+            else if (n_num == 2)
+            {
+                __AnalyzeStaff(cur, &measure->staffs[1]);
+            }
+            else
+            {
+                return;
+            }
+        }
+    }
+}
+static void __AnalyzeStaff(xmlNode* staff_node, MENG_Staff* staff)
+{
+    if (staff_node == NULL || staff == NULL) return;
+    for (xmlNode* cur = staff_node->children; cur != NULL; cur = cur->next)
+    {
+        if (cur->type == XML_ELEMENT_NODE && xmlStrcmp(cur->name, (const xmlChar *)"layer") == 0)
+        {
+            unsigned int index = strtol((const char*)xmlGetProp(cur, (xmlChar*)"n"), NULL, 10) - 1;
+            if (staff->layers == NULL)
+            {
+                staff->layers = (MENG_Layer**)calloc(index + 1, sizeof(MENG_Layer*));
+                staff->layers_count = index + 1;
+            }
+            else if (staff->layers_count < index + 1)
+            {
+                staff->layers = (MENG_Layer**)realloc(staff->layers, (index + 1) * sizeof(MENG_Layer*));
+                for (unsigned int i = staff->layers_count; i < (index + 1); i++)
+                {
+                    staff->layers[i] = NULL;
+                }
+                staff->layers_count = index + 1;
+            }
+            staff->layers[index] = (MENG_Layer*)calloc(1, sizeof(MENG_Layer));
+            __AnalyzeLayer(cur, staff->layers[index]);
+        }
+    }
+}
+static void __AnalyzeLayer(xmlNode* layer_node, MENG_Layer* layer)
+{
+    if (layer_node == NULL || layer == NULL) return;
+    unsigned int notes_count = 0;
+    unsigned int rests_count = 0;
+    unsigned int chords_count = 0;
+    unsigned int beams_count = 0;
+    for (xmlNode* cur = layer_node->children; cur != NULL; cur = cur->next)
+    {
+        if (cur->type == XML_ELEMENT_NODE && xmlStrcmp(cur->name, (const xmlChar *)"note") == 0)
+        {
+            notes_count++;
+        }
+        else if (cur->type == XML_ELEMENT_NODE && xmlStrcmp(cur->name, (const xmlChar *)"rest") == 0)
+        {
+            rests_count++;
+        }
+        else if (cur->type == XML_ELEMENT_NODE && xmlStrcmp(cur->name, (const xmlChar *)"chord") == 0)
+        {
+            chords_count++;
+        }
+        else if (cur->type == XML_ELEMENT_NODE && xmlStrcmp(cur->name, (const xmlChar *)"beam") == 0)
+        {
+            beams_count++;
+        }
+    }
+    layer->notes_count = notes_count;
+    layer->rests_count = rests_count;
+    layer->chords_count = chords_count;
+    layer->beams_count = beams_count;
+    if (notes_count > 0)
+    {
+        layer->notes = (MENG_Note**)calloc(notes_count, sizeof(MENG_Note*));
+    }
+    if (rests_count > 0)
+    {
+        layer->rests = (MENG_Rest**)calloc(rests_count, sizeof(MENG_Rest*));
+    }
+    if (chords_count > 0)
+    {
+        layer->chords = (MENG_Chord**)calloc(chords_count, sizeof(MENG_Chord*));
+    }
+    if (beams_count > 0)
+    {
+        layer->beams = (MENG_Beam**)calloc(beams_count, sizeof(MENG_Beam*));
+    }
+
+    unsigned int notes_i = 0;
+    unsigned int rests_i = 0;
+    unsigned int chords_i = 0;
+    unsigned int beams_i = 0;
+
+    unsigned int total_count = notes_count + rests_count + chords_count + beams_count;
+    if (total_count > 0)
+    {
+        layer->order_count = total_count;
+        layer->order = (MENG_Order**)calloc(total_count, sizeof(MENG_Order*));
+    }
+    for (xmlNode* cur = layer_node->children; cur != NULL; cur = cur->next)
+    {
+        unsigned int total_i = notes_i + rests_i + chords_i + beams_i;
+        if (cur->type == XML_ELEMENT_NODE && xmlStrcmp(cur->name, (const xmlChar *)"note") == 0)
+        {
+            xmlChar* dur_text = xmlGetProp(cur, (xmlChar*)"dur");
+            if (dur_text == NULL) return;
+            xmlChar* oct_text = xmlGetProp(cur, (xmlChar*)"oct");
+            if (oct_text == NULL) return;
+            xmlChar* pname_text = xmlGetProp(cur, (xmlChar*)"pname");
+            if (pname_text == NULL) return;
+            layer->notes[notes_i] = (MENG_Note*)calloc(1, sizeof(MENG_Note));
+            layer->notes[notes_i]->dur = __TranslateDurationByText((const char*)dur_text);
+            layer->notes[notes_i]->oct = __TranslateOctaveByText((const char*)oct_text);
+            layer->notes[notes_i]->pname = __TranslatePitchByText((const char*)pname_text);
+            xmlFree(oct_text);
+            xmlFree(pname_text);
+            layer->order[total_i] = (MENG_Order*)calloc(1, sizeof(MENG_Order));
+            layer->order[total_i]->type = MENG_TYPE_NOTE;
+            layer->order[total_i]->element.note = layer->notes[notes_i];
+            notes_i++;
+        }
+        else if (cur->type == XML_ELEMENT_NODE && xmlStrcmp(cur->name, (const xmlChar *)"rest") == 0)
+        {
+            xmlChar* dur_text = xmlGetProp(cur, (xmlChar*)"dur");
+            if (dur_text == NULL) return;
+            layer->rests[rests_i] = (MENG_Rest*)calloc(1, sizeof(MENG_Rest));
+            layer->rests[rests_i]->dur = __TranslateDurationByText((const char*)dur_text);
+            xmlFree(dur_text);
+            layer->order[total_i] = (MENG_Order*)calloc(1, sizeof(MENG_Order));
+            layer->order[total_i]->type = MENG_TYPE_REST;
+            layer->order[total_i]->element.rest = layer->rests[rests_i];
+            rests_i++;
+        }
+        else if (cur->type == XML_ELEMENT_NODE && xmlStrcmp(cur->name, (const xmlChar *)"chord") == 0)
+        {
+            layer->chords[chords_i] = __AnalyzeChord(cur);
+            layer->order[total_i] = (MENG_Order*)calloc(1, sizeof(MENG_Order));
+            layer->order[total_i]->type = MENG_TYPE_CHORD;
+            layer->order[total_i]->element.chord = layer->chords[chords_i];
+            chords_i++;
+        }
+        else if (cur->type == XML_ELEMENT_NODE && xmlStrcmp(cur->name, (const xmlChar *)"beam") == 0)
+        {
+            layer->beams[beams_i] = __AnalyzeBeam(cur);
+            layer->order[total_i] = (MENG_Order*)calloc(1, sizeof(MENG_Order));
+            layer->order[total_i]->type = MENG_TYPE_BEAM;
+            layer->order[total_i]->element.beam = layer->beams[beams_i];
+            beams_i++;
+        }
+    }
+    
+}
+static MENG_Chord* __AnalyzeChord(xmlNode* chord_node)
+{
+    if (chord_node == NULL) return NULL;
+    xmlChar* dur_text = xmlGetProp(chord_node, (xmlChar*)"dur");
+    if (dur_text == NULL) return NULL;
+    MENG_Chord* new_chord = (MENG_Chord*)calloc(1, sizeof(MENG_Chord));
+    new_chord->dur = __TranslateDurationByText((const char*)dur_text);
+    unsigned int notes_count = 0;
+    for (xmlNode* cur = chord_node->children; cur != NULL; cur = cur->next)
+    {
+        if (cur->type == XML_ELEMENT_NODE && xmlStrcmp(cur->name, (const xmlChar *)"note") == 0)
+        {
+            notes_count++;
+        }
+    }
+    new_chord->notes = (MENG_Note**)calloc(notes_count, sizeof(MENG_Note*));
+    new_chord->notes_count = notes_count;
+    unsigned int notes_i = 0;
+    for (xmlNode* cur = chord_node->children; cur != NULL; cur = cur->next)
+    {
+        if (cur->type == XML_ELEMENT_NODE && xmlStrcmp(cur->name, (const xmlChar *)"note") == 0)
+        {
+            xmlChar* oct_name = xmlGetProp(cur, (xmlChar*)"oct");
+            xmlChar* pname_name = xmlGetProp(cur, (xmlChar*)"pname");
+            new_chord->notes[notes_i] = (MENG_Note*)calloc(1, sizeof(MENG_Note));
+            new_chord->notes[notes_i]->dur = 0;
+            new_chord->notes[notes_i]->oct = __TranslateOctaveByText((const char*) oct_name);
+            new_chord->notes[notes_i]->pname = __TranslatePitchByText((const char*) pname_name);
+            xmlFree(oct_name);
+            xmlFree(pname_name);
+            notes_i++;
+        }
+    }
+    xmlFree(dur_text);
+    return new_chord;
+}
+static MENG_Beam* __AnalyzeBeam(xmlNode* beam_node)
+{
+    if (beam_node == NULL) return NULL;
+    MENG_Beam* new_beam = (MENG_Beam*)calloc(1, sizeof(MENG_Beam));
+    unsigned int notes_count = 0;
+    unsigned int rests_count = 0;
+    unsigned int chords_count = 0;
+    for (xmlNode* cur = beam_node->children; cur != NULL; cur = cur->next)
+    {
+        if (cur->type == XML_ELEMENT_NODE && xmlStrcmp(cur->name, (const xmlChar *)"note") == 0)
+        {
+            notes_count++;
+        }
+        else if (cur->type == XML_ELEMENT_NODE && xmlStrcmp(cur->name, (const xmlChar *)"rest") == 0)
+        {
+            rests_count++;
+        }
+        else if (cur->type == XML_ELEMENT_NODE && xmlStrcmp(cur->name, (const xmlChar *)"chord") == 0)
+        {
+            chords_count++;
+        }
+    }
+    new_beam->notes_count = notes_count;
+    new_beam->rests_count = rests_count;
+    new_beam->chords_count = chords_count;
+    if (notes_count > 0)
+    {
+        new_beam->notes = (MENG_Note**)calloc(notes_count, sizeof(MENG_Note*));
+    }
+    if (rests_count > 0)
+    {
+        new_beam->rests = (MENG_Rest**)calloc(rests_count, sizeof(MENG_Rest*));
+    }
+    if (chords_count > 0)
+    {
+        new_beam->chords = (MENG_Chord**)calloc(chords_count, sizeof(MENG_Chord*));
+    }
+    unsigned int notes_i = 0;
+    unsigned int rests_i = 0;
+    unsigned int chords_i = 0;
+    unsigned int total_count = notes_count + rests_count + chords_count;
+    if (total_count > 0)
+    {
+        new_beam->order_count = total_count;
+        new_beam->order = (MENG_Order**)calloc(total_count, sizeof(MENG_Order*));
+    }
+    for (xmlNode* cur = beam_node->children; cur != NULL; cur = cur->next)
+    {
+        unsigned int total_i = notes_i + rests_i + chords_i;
+        if (cur->type == XML_ELEMENT_NODE && xmlStrcmp(cur->name, (const xmlChar *)"note") == 0)
+        {
+            xmlChar* dur_text = xmlGetProp(cur, (xmlChar*)"dur");
+            if (dur_text == NULL) return new_beam;
+            xmlChar* oct_text = xmlGetProp(cur, (xmlChar*)"oct");
+            if (oct_text == NULL) return new_beam;
+            xmlChar* pname_text = xmlGetProp(cur, (xmlChar*)"pname");
+            if (pname_text == NULL) return new_beam;
+            new_beam->notes[notes_i] = (MENG_Note*)calloc(1, sizeof(MENG_Note));
+            new_beam->notes[notes_i]->dur = __TranslateDurationByText((const char*)dur_text);
+            new_beam->notes[notes_i]->oct = __TranslateOctaveByText((const char*)oct_text);
+            new_beam->notes[notes_i]->pname = __TranslatePitchByText((const char*)pname_text);
+            xmlFree(oct_text);
+            xmlFree(pname_text);
+            new_beam->order[total_i] = (MENG_Order*)calloc(1, sizeof(MENG_Order));
+            new_beam->order[total_i]->type = MENG_TYPE_NOTE;
+            new_beam->order[total_i]->element.note = new_beam->notes[notes_i];
+            notes_i++;
+        }
+        else if (cur->type == XML_ELEMENT_NODE && xmlStrcmp(cur->name, (const xmlChar *)"rest") == 0)
+        {
+            xmlChar* dur_text = xmlGetProp(cur, (xmlChar*)"dur");
+            if (dur_text == NULL) return new_beam;
+            new_beam->rests[rests_i] = (MENG_Rest*)calloc(1, sizeof(MENG_Rest));
+            new_beam->rests[rests_i]->dur = __TranslateDurationByText((const char*)dur_text);
+            xmlFree(dur_text);
+            new_beam->order[total_i] = (MENG_Order*)calloc(1, sizeof(MENG_Order));
+            new_beam->order[total_i]->type = MENG_TYPE_REST;
+            new_beam->order[total_i]->element.rest = new_beam->rests[rests_i];
+            rests_i++;
+        }
+        else if (cur->type == XML_ELEMENT_NODE && xmlStrcmp(cur->name, (const xmlChar *)"chord") == 0)
+        {
+            new_beam->chords[chords_i] = __AnalyzeChord(cur);
+            new_beam->order[total_i] = (MENG_Order*)calloc(1, sizeof(MENG_Order));
+            new_beam->order[total_i]->type = MENG_TYPE_CHORD;
+            new_beam->order[total_i]->element.chord = new_beam->chords[chords_i];
+            chords_i++;
+        }
+    }
+    return new_beam;
+}
+
+static char __TranslatePicthToText(MENG_Pitch pitch)
+{
+    char pitch_text;
+    switch (pitch)
+    {
+        case MENG_PITCH_C:
+            pitch_text = 'c';
+            return pitch_text;
+        case MENG_PITCH_D:
+            pitch_text = 'd';
+            return pitch_text;
+        case MENG_PITCH_E:
+            pitch_text = 'e';
+            return pitch_text;
+        case MENG_PITCH_F:
+            pitch_text = 'f';
+            return pitch_text;
+        case MENG_PITCH_G:
+            pitch_text = 'g';
+            return pitch_text;
+        case MENG_PITCH_A:
+            pitch_text = 'a';
+            return pitch_text;
+        case MENG_PITCH_B:
+            pitch_text = 'b';
+            return pitch_text;
+        default:
+            return '\0';
+    }
+}
+
+static char* __TranslateTempoPlacementToText(MENG_TempoPlacement place)
+{
+    char* place_text = malloc(10);
+    if (place == MENG_TEMPOPLACEMENT_ABOVE)
+    {
+        sprintf(place_text, "above");
+        return place_text;
+    }
+    else if (place == MENG_TEMPOPLACEMENT_BELOW)
+    {
+        sprintf(place_text, "below");
+        return place_text;
+    }
+    else if (place == MENG_TEMPOPLACEMENT_BETWEEN)
+    {
+        sprintf(place_text, "between");
+        return place_text;
+    }
+    else if (place == MENG_TEMPOPLACEMENT_WITHIN)
+    {
+        sprintf(place_text, "within");
+        return place_text;
+    }
+    free(place_text);
+    return NULL;    
 }

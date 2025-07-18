@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdbool.h>
+#include <math.h>
 
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_main.h>
@@ -34,26 +35,11 @@ SDL_Texture* render_svg_into_texture (const char* svg, int* w, int* h);
 int main (int argc, char* argv[])
 {
 	MENG_Init("./libs/verovio/data");
-	MENG_MEI mei = MENG_LoadMEIFile("res/MM.mei");
-	MENG_PrintMEI(mei);
-
+	StartSDL();
 	
-	char* mei_str = MENG_OutputMeiAsChar(mei);
-	printf("[MEI str]:\n%s", (xmlChar*)mei_str);
-	xmlFree(mei_str);
-
-	VRV_Toolkit tk = vrvToolkit_constructorResourcePath("./libs/verovio/data");
-	enableLog(false);
-
-    vrvToolkit_loadFile(tk, "./res/MM.mei");
-	const char *options = "{\"breaks\": \"none\" }";
-	vrvToolkit_setOptions(tk, options);
-	vrvToolkit_redoLayout(tk, options);
-	
-	const char* score_svg = vrvToolkit_renderToSVG(tk, 1, true);
-	vrvToolkit_renderToSVGFile(tk, "res/output.svg", 1);
-
-    StartSDL();
+	/*MENG_MEI test = MENG_LoadMEIFile("res/MM.mei");
+	const char* out = MENG_OutputMeiAsChar(&test);
+	printf("%s\n", out);*/
 
 	SDL_ShowCursor(SDL_DISABLE);
 	VENG_Init(driver);
@@ -69,24 +55,119 @@ int main (int argc, char* argv[])
 
     VENG_PrepareScreen(screen);
 
+	float scale = 10.0f;
+	MENG_MEI mei = MENG_LoadMEIFile("./res/MM.mei");
+	MENG_Renderer* m_renderer = MENG_CreateRenderer(renderer, &mei, score->rect.h, scale);
+	if (MENG_RenderSVG(m_renderer) < 0)
+	{
+		printf("SVG went wrong\n");
+		return -1;
+	}
+	//m_renderer->svg = score_svg;
+	if (MENG_RenderTextures(m_renderer) < 0)
+	{
+		printf("texture went wrong\n");
+		return -1;
+	}
+	MENG_PrintRenderer(m_renderer);
+
+	MENG_Dimentions dim = MENG_GetSurfaceDimentions(m_renderer);
+	SDL_Rect viewport = (SDL_Rect){0, 0, dim.w, dim.h};
+
 	SDL_Event event;
 	int close_requested = 0;
+	float last_finger_x = 0;
+	float last_finger_y = 0;
+	int finger_count = 0;
 
-	int render_w, render_h;
-	SDL_Texture* texture = render_svg_into_texture(score_svg, &render_w, &render_h);
-	if (texture == NULL)
+	typedef struct Finger
 	{
-		printf("Something failed\n");
-	}
+		SDL_FingerID id;
+		float x, y;
+	} Finger;
+
+	Finger fingers[2];
+	int active_fingers = 0;
+	float last_distance = 0.0f;
 
 	Uint64 time0 = SDL_GetTicks64();
-	while(!close_requested)
+	while (!close_requested)
 	{
 		while (SDL_PollEvent(&event))
-		{	
+		{
 			VENG_ListenScreen(&event, screen);
+
 			switch (event.type)
 			{
+				case SDL_FINGERDOWN:
+					if (active_fingers < 2) {
+						fingers[active_fingers].id = event.tfinger.fingerId;
+						fingers[active_fingers].x = event.tfinger.x;
+						fingers[active_fingers].y = event.tfinger.y;
+						active_fingers++;
+
+						if (active_fingers == 1) {
+							last_finger_x = event.tfinger.x;
+							last_finger_y = event.tfinger.y;
+						}
+						else if (active_fingers == 2) {
+							float dx = fingers[1].x - fingers[0].x;
+							float dy = fingers[1].y - fingers[0].y;
+							last_distance = sqrtf(dx * dx + dy * dy);
+						}
+					}
+					break;
+
+				case SDL_FINGERMOTION:
+					for (int i = 0; i < active_fingers; ++i) {
+						if (event.tfinger.fingerId == fingers[i].id) {
+							fingers[i].x = event.tfinger.x;
+							fingers[i].y = event.tfinger.y;
+						}
+					}
+
+					if (active_fingers == 1) {
+						float dx = event.tfinger.x - last_finger_x;
+						float dy = event.tfinger.y - last_finger_y;
+
+						viewport.x -= dx * viewport.w;
+						viewport.y -= dy * viewport.h;
+
+						last_finger_x = event.tfinger.x;
+						last_finger_y = event.tfinger.y;
+					}
+					else if (active_fingers == 2) {
+						float dx = fingers[1].x - fingers[0].x;
+						float dy = fingers[1].y - fingers[0].y;
+						float new_distance = sqrtf(dx * dx + dy * dy);
+						float zoom_factor = new_distance / last_distance;
+
+						float center_x = (fingers[0].x + fingers[1].x) / 2.0f;
+						float center_y = (fingers[0].y + fingers[1].y) / 2.0f;
+
+						float world_x = viewport.x + center_x * viewport.w;
+						float world_y = viewport.y + center_y * viewport.h;
+
+						viewport.w /= zoom_factor;
+						viewport.h /= zoom_factor;
+
+						viewport.x = world_x - center_x * viewport.w;
+						viewport.y = world_y - center_y * viewport.h;
+
+						last_distance = new_distance;
+					}
+					break;
+
+				case SDL_FINGERUP:
+					for (int i = 0; i < active_fingers; ++i) {
+						if (event.tfinger.fingerId == fingers[i].id) {
+							fingers[i] = fingers[active_fingers - 1];
+							active_fingers--;
+							break;
+						}
+					}
+					break;
+
 				case SDL_QUIT:
 					close_requested = 1;
 					break;
@@ -95,18 +176,14 @@ int main (int argc, char* argv[])
 
 		SDL_RenderClear(renderer);
 
-		VENG_PrepareScreen(screen);
+		
 
 		fill_a_rect_with_color(score, (SDL_Color){255, 255, 255, 255});
-
-		SDL_Rect rectan = (SDL_Rect){0, 0, render_w, render_h};
-		SDL_SetRenderDrawColor(renderer, 23, 123, 50, 255);
-		SDL_RenderCopy(renderer, texture, NULL, &rectan);
-
 		
+		MENG_Render(m_renderer, score, &viewport);
 
         SDL_RenderPresent(renderer);
-		
+
 		SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
 
 		// FPS management
@@ -119,7 +196,6 @@ int main (int argc, char* argv[])
 
 		time0 = SDL_GetTicks64();
 	}
-	vrvToolkit_destructor(tk);
 	VENG_Destroy(true);
 	return 0;
 }
